@@ -1,4 +1,4 @@
-// Package oneaddr is a plugin for rewriting responses to retain only single address
+// Package oneaddr provides a CoreDNS plugin that keeps one address per owner name.
 package oneaddr
 
 import (
@@ -13,8 +13,6 @@ type dedupKey struct {
 	class  uint16
 }
 
-type dedupSet = map[dedupKey]struct{}
-
 func makeDedupKey(rec dns.RR) dedupKey {
 	hdr := rec.Header()
 	return dedupKey{
@@ -24,22 +22,18 @@ func makeDedupKey(rec dns.RR) dedupKey {
 	}
 }
 
-// OneAddrResponseWriter is a response writer that shuffles A, AAAA and MX records.
+// OneAddrResponseWriter filters duplicate A and AAAA records from responses.
 type OneAddrResponseWriter struct {
 	dns.ResponseWriter
 }
 
 // WriteMsg implements the dns.ResponseWriter interface.
 func (r *OneAddrResponseWriter) WriteMsg(res *dns.Msg) error {
-	if res.Rcode != dns.RcodeSuccess {
+	if res.Rcode != dns.RcodeSuccess || len(res.Question) == 0 {
 		return r.ResponseWriter.WriteMsg(res)
 	}
 
-	if res.Question[0].Qtype == dns.TypeAXFR || res.Question[0].Qtype == dns.TypeIXFR {
-		return r.ResponseWriter.WriteMsg(res)
-	}
-
-	if res.Question[0].Qtype != dns.TypeA && res.Question[0].Qtype != dns.TypeAAAA {
+	if qtype := res.Question[0].Qtype; qtype != dns.TypeA && qtype != dns.TypeAAAA {
 		return r.ResponseWriter.WriteMsg(res)
 	}
 
@@ -50,20 +44,17 @@ func (r *OneAddrResponseWriter) WriteMsg(res *dns.Msg) error {
 }
 
 func trimRecords(in []dns.RR) []dns.RR {
-	seen := make(dedupSet)
-	out := []dns.RR{}
+	seen := make(map[dedupKey]struct{}, len(in))
+	out := make([]dns.RR, 0, len(in))
 	for _, rec := range in {
-		switch rec.Header().Rrtype {
-		case dns.TypeA, dns.TypeAAAA:
+		if rrtype := rec.Header().Rrtype; rrtype == dns.TypeA || rrtype == dns.TypeAAAA {
 			key := makeDedupKey(rec)
 			if _, ok := seen[key]; ok {
 				continue
 			}
 			seen[key] = struct{}{}
-			fallthrough
-		default:
-			out = append(out, rec)
 		}
+		out = append(out, rec)
 	}
 
 	return out
@@ -72,7 +63,6 @@ func trimRecords(in []dns.RR) []dns.RR {
 // Write implements the dns.ResponseWriter interface.
 func (r *OneAddrResponseWriter) Write(buf []byte) (int, error) {
 	// Should we pack and unpack here to fiddle with the packet... Not likely.
-	log.Warning("oneaddr plugin called with Write: not shuffling records")
-	n, err := r.ResponseWriter.Write(buf)
-	return n, err
+	log.Warning("oneaddr plugin called with Write: truncated records")
+	return r.ResponseWriter.Write(buf)
 }
