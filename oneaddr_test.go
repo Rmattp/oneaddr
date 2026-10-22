@@ -71,6 +71,41 @@ func TestOneAddrSimple(t *testing.T) {
 	}
 }
 
+func TestOneAddrAAAA(t *testing.T) {
+	x := OneAddr{
+		Next: test.HandlerFunc(func(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+			m := new(dns.Msg)
+			m.SetReply(r)
+			m.Answer = []dns.RR{
+				test.AAAA("example.org.\t300\tIN\tAAAA\t\t2001:db8::1"),
+				test.AAAA("example.org.\t300\tIN\tAAAA\t\t2001:db8::2"),
+			}
+			return dns.RcodeSuccess, w.WriteMsg(m)
+		}),
+	}
+
+	r := new(dns.Msg)
+	r.SetQuestion("example.org.", dns.TypeAAAA)
+	rec := dnstest.NewRecorder(&test.ResponseWriter{})
+
+	if _, err := x.ServeDNS(context.Background(), rec, r); err != nil {
+		t.Fatalf("ServeDNS returned an error: %v", err)
+	}
+	if rec.Msg == nil {
+		t.Fatal("response recorder contains no message")
+	}
+	if len(rec.Msg.Answer) != 1 {
+		t.Fatalf("expected one AAAA answer, got %d", len(rec.Msg.Answer))
+	}
+	got, ok := rec.Msg.Answer[0].(*dns.AAAA)
+	if !ok {
+		t.Fatalf("expected AAAA answer, got %T", rec.Msg.Answer[0])
+	}
+	if want := "2001:db8::1"; !got.AAAA.Equal(net.ParseIP(want)) {
+		t.Errorf("expected first address %s, got %s", want, got.AAAA)
+	}
+}
+
 func TestOneAddrComplex(t *testing.T) {
 	x := OneAddr{
 		Next: test.HandlerFunc(func(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
