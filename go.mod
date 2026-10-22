@@ -1,4 +1,4 @@
-module github.com/SenseUnit/oneaddr
+module github.com/Rmattp/oneaddr
 
 go 1.26.9
 
